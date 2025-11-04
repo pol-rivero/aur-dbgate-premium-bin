@@ -1,0 +1,94 @@
+name: Check DbGate Release
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"   # every 6 hours
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # needed to push current_version.txt updates
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Determine latest DbGate version
+        id: latest
+        shell: bash
+        env:
+          REPO_NAME: dbgate/dbgate
+        run: |
+          set -euo pipefail
+          API_URL="https://api.github.com/repos/${REPO_NAME}/releases/latest"
+          echo "Fetching latest release from ${API_URL}"
+          LATEST=$(curl -sSL "${API_URL}" | grep -oP '"tag_name":\s*"\K(.*)(?=")' | sed 's/^v//')
+          echo "latest=${LATEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Compare with current_version.txt
+        id: compare
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f current_version.txt ]; then
+            CURRENT=$(tr -d ' \t\n\r' < current_version.txt)
+          else
+            CURRENT=""
+          fi
+
+          echo "Current version: '${CURRENT}'"
+          echo "New version: '${{ steps.latest.outputs.latest }}'"
+
+          if [ "${{ steps.latest.outputs.latest }}" != "${CURRENT}" ]; then
+            echo "Version has changed."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Version has not changed."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate PKGBUILD
+        if: steps.compare.outputs.changed == 'true'
+        run: |
+          # Download the appimage and compute its sha256sums
+          set -euo pipefail
+          curl -L -o dbgate-premium-latest.AppImage "https://github.com/dbgate/dbgate/releases/download/v${{ steps.latest.outputs.latest }}/dbgate-premium-latest.AppImage"
+          APPIMAGE_SHA256=$(sha256sum dbgate-premium-latest.AppImage | awk '{print $1}')
+          LAUNCHER_SCRIPT_SHA256=$(sha256sum assets/dbgate-premium.sh | awk '{print $1}')
+
+          # Replace variables in the template
+          sed -e "s/\[\[VERSION\]\]/${{ steps.latest.outputs.latest }}/g" \
+              -e "s/\[\[APPIMAGE_SHA256\]\]/$APPIMAGE_SHA256/g" \
+              -e "s/\[\[LAUNCHER_SCRIPT_SHA256\]\]/$LAUNCHER_SCRIPT_SHA256/g" \
+              PKGBUILD-template > PKGBUILD
+
+      - name: Publish AUR package
+        if: steps.compare.outputs.changed == 'true'
+        uses: KSXGitHub/github-actions-deploy-aur@v4.1.1
+        with:
+          pkgname: dbgate-premium-bin
+          pkgbuild: ./PKGBUILD
+          assets: |
+            assets/dbgate-premium.sh
+          commit_username: ${{ secrets.AUR_USERNAME }}
+          commit_email: ${{ secrets.AUR_EMAIL }}
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Update to version ${{ steps.latest.outputs.latest }}"
+          ssh_keyscan_types: rsa,ecdsa,ed25519
+
+      - name: Update version file
+        if: steps.compare.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          printf "%s\n" "${{ steps.latest.outputs.latest }}" > current_version.txt
+
+          # Commit the updated current_version.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add current_version.txt
+          git commit -m "Update to version ${{ steps.latest.outputs.latest }}"
+          git push
