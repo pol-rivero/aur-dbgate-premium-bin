@@ -58,10 +58,21 @@ jobs:
           APPIMAGE_SHA256=$(sha256sum dbgate-premium-latest.AppImage | awk '{print $1}')
           LAUNCHER_SCRIPT_SHA256=$(sha256sum assets/dbgate-premium.sh | awk '{print $1}')
 
+          # Download the tarball and extract the source code to 'source' directory
+          curl -L -o source.tar.gz "https://github.com/dbgate/dbgate/archive/refs/tags/v${{ steps.latest.outputs.latest }}.tar.gz"
+          tar -xzf source.tar.gz
+          mv "dbgate-${{ steps.latest.outputs.latest }}" source
+
+          # Get Electron version from source/app/package.json
+          # Search for the line "electron": "30.0.2", and extract the major version
+          ELECTRON_VERSION=$(grep -oP '"electron":\s*"\K[^"]+' source/app/package.json | awk -F. '{print $1}')
+          echo "Detected Electron version: $ELECTRON_VERSION"
+
           # Replace variables in the template
           sed -e "s/\[\[VERSION\]\]/${{ steps.latest.outputs.latest }}/g" \
               -e "s/\[\[APPIMAGE_SHA256\]\]/$APPIMAGE_SHA256/g" \
               -e "s/\[\[LAUNCHER_SCRIPT_SHA256\]\]/$LAUNCHER_SCRIPT_SHA256/g" \
+              -e "s/\[\[ELECTRON_VERSION\]\]/$ELECTRON_VERSION/g" \
               PKGBUILD-template > PKGBUILD
 
       - name: Publish AUR package

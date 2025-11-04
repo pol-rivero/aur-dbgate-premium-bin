@@ -4,7 +4,7 @@
 pkgname=dbgate-premium-bin
 _pkgname=dbgate-premium
 pkgver=[[VERSION]]
-_electronversion=30
+_electronversion=[[ELECTRON_VERSION]]
 pkgrel=1
 pkgdesc="Database manager for MySQL, PostgreSQL, SQL Server, MongoDB, SQLite and others. Premium edition (proprietary). (Uses system-wide Electron)"
 arch=('x86_64')
