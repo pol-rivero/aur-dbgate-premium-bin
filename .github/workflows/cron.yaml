@@ -2,7 +2,7 @@ name: Check DbGate Release
 
 on:
   schedule:
-    - cron: "0 */6 * * *"   # every 6 hours
+    - cron: "0 */1 * * *"   # every hour
   workflow_dispatch: {}
 
 permissions:
@@ -11,6 +11,9 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.compare.outputs.changed }}
+      latest: ${{ steps.latest.outputs.latest }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -49,19 +52,26 @@ jobs:
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
 
+  publish:
+    runs-on: ubuntu-latest
+    needs: check
+    if: needs.check.outputs.changed == 'true'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
       - name: Generate PKGBUILD
-        if: steps.compare.outputs.changed == 'true'
         run: |
           # Download the appimage and compute its sha256sums
           set -euo pipefail
-          curl -L -o dbgate-premium-latest.AppImage "https://github.com/dbgate/dbgate/releases/download/v${{ steps.latest.outputs.latest }}/dbgate-premium-latest.AppImage"
+          curl -L -o dbgate-premium-latest.AppImage "https://github.com/dbgate/dbgate/releases/download/v${{ needs.check.outputs.latest }}/dbgate-premium-latest.AppImage"
           APPIMAGE_SHA256=$(sha256sum dbgate-premium-latest.AppImage | awk '{print $1}')
           LAUNCHER_SCRIPT_SHA256=$(sha256sum assets/dbgate-premium.sh | awk '{print $1}')
 
           # Download the tarball and extract the source code to 'source' directory
-          curl -L -o source.tar.gz "https://github.com/dbgate/dbgate/archive/refs/tags/v${{ steps.latest.outputs.latest }}.tar.gz"
+          curl -L -o source.tar.gz "https://github.com/dbgate/dbgate/archive/refs/tags/v${{ needs.check.outputs.latest }}.tar.gz"
           tar -xzf source.tar.gz
-          mv "dbgate-${{ steps.latest.outputs.latest }}" source
+          mv "dbgate-${{ needs.check.outputs.latest }}" source
 
           # Get Electron version from source/app/package.json
           # Search for the line "electron": "30.0.2", and extract the major version
@@ -69,14 +79,13 @@ jobs:
           echo "Detected Electron version: $ELECTRON_VERSION"
 
           # Replace variables in the template
-          sed -e "s/\[\[VERSION\]\]/${{ steps.latest.outputs.latest }}/g" \
+          sed -e "s/\[\[VERSION\]\]/${{ needs.check.outputs.latest }}/g" \
               -e "s/\[\[APPIMAGE_SHA256\]\]/$APPIMAGE_SHA256/g" \
               -e "s/\[\[LAUNCHER_SCRIPT_SHA256\]\]/$LAUNCHER_SCRIPT_SHA256/g" \
               -e "s/\[\[ELECTRON_VERSION\]\]/$ELECTRON_VERSION/g" \
               PKGBUILD-template > PKGBUILD
 
       - name: Publish AUR package
-        if: steps.compare.outputs.changed == 'true'
         uses: KSXGitHub/github-actions-deploy-aur@v4.1.1
         with:
           pkgname: dbgate-premium-bin
@@ -86,20 +95,19 @@ jobs:
           commit_username: ${{ secrets.AUR_USERNAME }}
           commit_email: ${{ secrets.AUR_EMAIL }}
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-          commit_message: "Update to version ${{ steps.latest.outputs.latest }}"
+          commit_message: "Update to version ${{ needs.check.outputs.latest }}"
           ssh_keyscan_types: rsa,ecdsa,ed25519
 
       - name: Update version file
-        if: steps.compare.outputs.changed == 'true'
         shell: bash
         run: |
           set -euo pipefail
 
-          printf "%s\n" "${{ steps.latest.outputs.latest }}" > current_version.txt
+          printf "%s\n" "${{ needs.check.outputs.latest }}" > current_version.txt
 
           # Commit the updated current_version.txt
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add current_version.txt
-          git commit -m "Update to version ${{ steps.latest.outputs.latest }}"
+          git commit -m "Update to version ${{ needs.check.outputs.latest }}"
           git push
