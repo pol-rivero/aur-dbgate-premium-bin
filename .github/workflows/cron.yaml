@@ -23,11 +23,17 @@ jobs:
         shell: bash
         env:
           REPO_NAME: dbgate/dbgate
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           API_URL="https://api.github.com/repos/${REPO_NAME}/releases/latest"
           echo "Fetching latest release from ${API_URL}"
-          LATEST=$(curl -sSL "${API_URL}" | grep -oP '"tag_name":\s*"\K(.*)(?=")' | sed 's/^v//')
+          curl -sSL --fail-with-body \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -o /tmp/gh_response.json -w "HTTP Status: %{http_code}\n" \
+            "${API_URL}" || { echo "Response body:"; cat /tmp/gh_response.json; exit 1; }
+          LATEST=$(grep -oP '"tag_name":\s*"\K(.*)(?=")' /tmp/gh_response.json | sed 's/^v//')
           echo "latest=${LATEST}" >> "$GITHUB_OUTPUT"
 
       - name: Compare with current_version.txt
