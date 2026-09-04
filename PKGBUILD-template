@@ -35,7 +35,7 @@ prepare() {
 
   # Extract AppImage contents
   chmod +x "${srcdir}/${_appimage_file_name}"
-  "${srcdir}/${_appimage_file_name}" --appimage-extract
+  "${srcdir}/${_appimage_file_name}" --appimage-extract >/dev/null
 
   # Find asar payload
   _asar="$(find "${srcdir}/squashfs-root" -type f -name 'app.asar' | head -n1)"
